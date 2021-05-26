@@ -89,9 +89,12 @@ public class NacosNamingService implements NamingService {
         InitUtils.initWebRootContext(properties);
         initCacheDir();
         initLogName(properties);
-        
+
+        // 服务端通信
         this.serverProxy = new NamingProxy(this.namespace, this.endpoint, this.serverList, properties);
+        // 心跳发送
         this.beatReactor = new BeatReactor(this.serverProxy, initClientBeatThreadCount(properties));
+        // 维护本地订阅的服务注册表信息
         this.hostReactor = new HostReactor(this.serverProxy, beatReactor, this.cacheDir, isLoadCacheAtStart(properties),
                 isPushEmptyProtect(properties), initPollingThreadCount(properties));
     }
@@ -177,7 +180,16 @@ public class NacosNamingService implements NamingService {
     public void registerInstance(String serviceName, String groupName, String ip, int port) throws NacosException {
         registerInstance(serviceName, groupName, ip, port, Constants.DEFAULT_CLUSTER_NAME);
     }
-    
+
+    /**
+     * 注册服务实例
+     *
+     * @param serviceName name of service
+     * @param ip          instance ip
+     * @param port        instance port
+     * @param clusterName instance cluster name
+     * @throws NacosException
+     */
     @Override
     public void registerInstance(String serviceName, String ip, int port, String clusterName) throws NacosException {
         registerInstance(serviceName, Constants.DEFAULT_GROUP, ip, port, clusterName);
@@ -186,13 +198,16 @@ public class NacosNamingService implements NamingService {
     @Override
     public void registerInstance(String serviceName, String groupName, String ip, int port, String clusterName)
             throws NacosException {
-        
+        // 创建 instance 实例
         Instance instance = new Instance();
         instance.setIp(ip);
         instance.setPort(port);
+        // 设置权重
         instance.setWeight(1.0);
+        // 设置集群名称
         instance.setClusterName(clusterName);
-        
+
+        // 注册
         registerInstance(serviceName, groupName, instance);
     }
     
@@ -204,11 +219,16 @@ public class NacosNamingService implements NamingService {
     @Override
     public void registerInstance(String serviceName, String groupName, Instance instance) throws NacosException {
         NamingUtils.checkInstanceIsLegal(instance);
+        // groupName@@serviceName
         String groupedServiceName = NamingUtils.getGroupedName(serviceName, groupName);
+        // 如果是临时节点（默认就是临时的），就会创建一个心跳信息，交给 beatReactor 组件发送心跳
         if (instance.isEphemeral()) {
+            // 创建心跳续约信息
             BeatInfo beatInfo = beatReactor.buildBeatInfo(groupedServiceName, instance);
+            // 添加
             beatReactor.addBeatInfo(groupedServiceName, beatInfo);
         }
+        // 调用 serverProxy 组件注册服务
         serverProxy.registerService(groupedServiceName, groupName, instance);
     }
     

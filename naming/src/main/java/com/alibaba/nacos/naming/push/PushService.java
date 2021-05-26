@@ -376,7 +376,8 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                 .containsKey(UtilsAndCommons.assembleFullServiceName(service.getNamespaceId(), service.getName()))) {
             return;
         }
-        
+
+        // 发布 service 改变事件
         this.applicationContext.publishEvent(new ServiceChangeEvent(this, service));
     }
     

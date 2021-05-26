@@ -123,7 +123,7 @@ public class InstanceController {
     };
     
     /**
-     * Register new instance.
+     * Register new instance. 服务注册
      *
      * @param request http request
      * @return 'ok' if success
@@ -133,14 +133,17 @@ public class InstanceController {
     @PostMapping
     @Secured(parser = NamingResourceParser.class, action = ActionTypes.WRITE)
     public String register(HttpServletRequest request) throws Exception {
-        
+        // 获取 namespaceId，默认 namespace 为 public
         final String namespaceId = WebUtils
                 .optional(request, CommonParams.NAMESPACE_ID, Constants.DEFAULT_NAMESPACE_ID);
+        // 获取 serviceName
         final String serviceName = WebUtils.required(request, CommonParams.SERVICE_NAME);
         NamingUtils.checkServiceNameFormat(serviceName);
-        
+
+        // 解析 instance
         final Instance instance = parseInstance(request);
-        
+
+        // 调用 serviceManager 组件进行实例注册
         serviceManager.registerInstance(namespaceId, serviceName, instance);
         return "ok";
     }

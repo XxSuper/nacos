@@ -98,6 +98,7 @@ public class ClientBeatCheckTask implements Runnable {
                                             service.getName(), UtilsAndCommons.LOCALHOST_SITE,
                                             instance.getInstanceHeartBeatTimeOut(), instance.getLastBeat());
                             getPushService().serviceChanged(service);
+                            // 发布心跳超时事件
                             ApplicationUtils.publishEvent(new InstanceHeartbeatTimeoutEvent(this, instance));
                         }
                     }

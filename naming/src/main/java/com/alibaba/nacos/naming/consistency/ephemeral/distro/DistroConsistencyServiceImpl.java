@@ -100,11 +100,20 @@ public class DistroConsistencyServiceImpl implements EphemeralConsistencyService
     
     @PostConstruct
     public void init() {
+        // 初始化时提交了一个任务
         GlobalExecutor.submitDistroNotifyTask(notifier);
     }
-    
+
+    /**
+     * 将数据存入存储器中
+     *
+     * @param key   key of data, this key should be globally unique
+     * @param value value of data
+     * @throws NacosException
+     */
     @Override
     public void put(String key, Record value) throws NacosException {
+        // 本地存储
         onPut(key, value);
         distroProtocol.sync(new DistroKey(key, KeyBuilder.INSTANCE_LIST_KEY_PREFIX), DataOperation.CHANGE,
                 globalConfig.getTaskDispatchPeriod() / 2);
@@ -128,19 +137,24 @@ public class DistroConsistencyServiceImpl implements EphemeralConsistencyService
      * @param value record
      */
     public void onPut(String key, Record value) {
-        
+        // 判断是否是临时节点
         if (KeyBuilder.matchEphemeralInstanceListKey(key)) {
+            // 封装 datum
             Datum<Instances> datum = new Datum<>();
             datum.value = (Instances) value;
             datum.key = key;
+            // 自增
             datum.timestamp.incrementAndGet();
+            // 放入 dataStore 中进行存储，底层数据结构为 map
             dataStore.put(key, datum);
         }
-        
+
+        // 如果 key 没有对应的 listener，直接返回。listeners 是发布订阅的功能，在初始化 service 时注册了2个监听器
         if (!listeners.containsKey(key)) {
             return;
         }
-        
+
+        // 添加通知任务
         notifier.addTask(key, DataOperation.CHANGE);
     }
     
@@ -373,19 +387,21 @@ public class DistroConsistencyServiceImpl implements EphemeralConsistencyService
         private BlockingQueue<Pair<String, DataOperation>> tasks = new ArrayBlockingQueue<>(1024 * 1024);
         
         /**
-         * Add new notify task to queue.
+         * Add new notify task to queue. 添加通知任务到队列中
          *
          * @param datumKey data key
          * @param action   action for data
          */
         public void addTask(String datumKey, DataOperation action) {
-            
+            // 如果已经存在并且是 changed 事件，直接 return
             if (services.containsKey(datumKey) && action == DataOperation.CHANGE) {
                 return;
             }
+            // 如果是 changed 事件，往 services 缓存中放一份
             if (action == DataOperation.CHANGE) {
                 services.put(datumKey, StringUtils.EMPTY);
             }
+            // 向任务队列中添加一个任务
             tasks.offer(Pair.with(datumKey, action));
         }
         
@@ -399,7 +415,9 @@ public class DistroConsistencyServiceImpl implements EphemeralConsistencyService
             
             for (; ; ) {
                 try {
+                    // 取出任务队列中的任务，调用handle方法进行处理
                     Pair<String, DataOperation> pair = tasks.take();
+                    // 处理任务
                     handle(pair);
                 } catch (Throwable e) {
                     Loggers.DISTRO.error("[NACOS-DISTRO] Error while handling notifying task", e);
@@ -411,11 +429,12 @@ public class DistroConsistencyServiceImpl implements EphemeralConsistencyService
             try {
                 String datumKey = pair.getValue0();
                 DataOperation action = pair.getValue1();
-                
+                // 从缓存中移除
                 services.remove(datumKey);
                 
                 int count = 0;
-                
+
+                // 判断是否有对应的监听器
                 if (!listeners.containsKey(datumKey)) {
                     return;
                 }
@@ -425,11 +444,14 @@ public class DistroConsistencyServiceImpl implements EphemeralConsistencyService
                     count++;
                     
                     try {
+                        // 通知数据已经改变
                         if (action == DataOperation.CHANGE) {
+                            // 将 key 对应的实例列表传过去
                             listener.onChange(datumKey, dataStore.get(datumKey).value);
                             continue;
                         }
-                        
+
+                        // 通知数据被删除
                         if (action == DataOperation.DELETE) {
                             listener.onDelete(datumKey);
                             continue;

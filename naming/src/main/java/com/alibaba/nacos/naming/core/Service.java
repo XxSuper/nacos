@@ -183,7 +183,8 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
                 // Reject this abnormal instance list:
                 throw new RuntimeException("got null instance " + key);
             }
-            
+
+            // 处理权重问题
             if (instance.getWeight() > 10000.0D) {
                 instance.setWeight(10000.0D);
             }
@@ -229,8 +230,8 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
     /**
      * Update instances.
      *
-     * @param instances instances
-     * @param ephemeral whether is ephemeral instance
+     * @param instances instances 新的 instance 集合
+     * @param ephemeral whether is ephemeral instance 是否是临时节点
      */
     public void updateIPs(Collection<Instance> instances, boolean ephemeral) {
         Map<String, List<Instance>> ipMap = new HashMap<>(clusterMap.size());
@@ -244,17 +245,20 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
                     Loggers.SRV_LOG.error("[NACOS-DOM] received malformed ip: null");
                     continue;
                 }
-                
+
+                // 如果 clusterName 为空设置成 DEFAULT
                 if (StringUtils.isEmpty(instance.getClusterName())) {
                     instance.setClusterName(UtilsAndCommons.DEFAULT_CLUSTER_NAME);
                 }
-                
+
+                // 如果 cluster 不存在就创建对应的 cluster
                 if (!clusterMap.containsKey(instance.getClusterName())) {
                     Loggers.SRV_LOG
                             .warn("cluster: {} not found, ip: {}, will create new cluster with default configuration.",
                                     instance.getClusterName(), instance.toJson());
                     Cluster cluster = new Cluster(instance.getClusterName(), this);
                     cluster.init();
+                    // 存入 clusterMap 中
                     getClusterMap().put(instance.getClusterName(), cluster);
                 }
                 
@@ -273,11 +277,16 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
         for (Map.Entry<String, List<Instance>> entry : ipMap.entrySet()) {
             //make every ip mine
             List<Instance> entryIPs = entry.getValue();
+            // 更新 cluster 下的 instance 集合
             clusterMap.get(entry.getKey()).updateIps(entryIPs, ephemeral);
         }
-        
+
+        // 设置最后修改时间
         setLastModifiedMillis(System.currentTimeMillis());
+        // service 服务列表发生变化进行通知
         getPushService().serviceChanged(this);
+
+        // 打印日志
         StringBuilder stringBuilder = new StringBuilder();
         
         for (Instance instance : allIPs()) {
@@ -293,8 +302,10 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
      * Init service.
      */
     public void init() {
+        // 添加健康检查任务，扫描这个 service 里面长时间没有心跳的 instance（服务实例），然后进行健康状态改变，服务下线
         HealthCheckReactor.scheduleCheck(clientBeatCheckTask);
         for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
+            // 初始化 cluster
             entry.getValue().setService(this);
             entry.getValue().init();
         }
@@ -399,7 +410,8 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
         Service service = this;
         
         serviceObject.put("name", service.getName());
-        
+
+        // 获取集群内所有的实例
         List<Instance> ips = service.allIPs();
         int invalidIpCount = 0;
         int ipCount = 0;
@@ -532,11 +544,13 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
         
         return checksum;
     }
-    
+
     /**
+     * 重新检查服务数
      * Re-calculate checksum of service.
      */
     public synchronized void recalculateChecksum() {
+        // 获取集群内所有的服务实例
         List<Instance> ips = allIPs();
         
         StringBuilder ipsString = new StringBuilder();

@@ -59,10 +59,12 @@ public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implement
     
     @JsonIgnore
     private HealthCheckTask checkTask;
-    
+
+    // 持久化实例集合
     @JsonIgnore
     private Set<Instance> persistentInstances = new HashSet<>();
-    
+
+    // 临时化实例集合
     @JsonIgnore
     private Set<Instance> ephemeralInstances = new HashSet<>();
     
@@ -236,7 +238,8 @@ public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implement
      * @param ephemeral whether these instances are ephemeral
      */
     public void updateIps(List<Instance> ips, boolean ephemeral) {
-        
+
+        // 获取老的 instance 集合
         Set<Instance> toUpdateInstances = ephemeral ? ephemeralInstances : persistentInstances;
         
         HashMap<String, Instance> oldIpMap = new HashMap<>(toUpdateInstances.size());
@@ -244,7 +247,8 @@ public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implement
         for (Instance ip : toUpdateInstances) {
             oldIpMap.put(ip.getDatumKey(), ip);
         }
-        
+
+        // 获取新加入的 instance 集合
         List<Instance> updatedIPs = updatedIps(ips, oldIpMap.values());
         if (updatedIPs.size() > 0) {
             for (Instance ip : updatedIPs) {
@@ -304,10 +308,12 @@ public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implement
     }
     
     private List<Instance> updatedIps(Collection<Instance> newInstance, Collection<Instance> oldInstance) {
-        
+
+        // 获取新旧 instances 集合的交集
         List<Instance> intersects = (List<Instance>) CollectionUtils.intersection(newInstance, oldInstance);
         Map<String, Instance> stringIpAddressMap = new ConcurrentHashMap<>(intersects.size());
-        
+
+        // 交集存入 stringIpAddressMap 中
         for (Instance instance : intersects) {
             stringIpAddressMap.put(instance.getIp() + ":" + instance.getPort(), instance);
         }
@@ -315,16 +321,17 @@ public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implement
         Map<String, Integer> intersectMap = new ConcurrentHashMap<>(newInstance.size() + oldInstance.size());
         Map<String, Instance> updatedInstancesMap = new ConcurrentHashMap<>(newInstance.size());
         Map<String, Instance> newInstancesMap = new ConcurrentHashMap<>(newInstance.size());
-        
+
+        // 旧的 instance 集合中交集的部分存入 intersectMap 中，值为 1
         for (Instance instance : oldInstance) {
             if (stringIpAddressMap.containsKey(instance.getIp() + ":" + instance.getPort())) {
                 intersectMap.put(instance.toString(), 1);
             }
         }
-        
+
         for (Instance instance : newInstance) {
             if (stringIpAddressMap.containsKey(instance.getIp() + ":" + instance.getPort())) {
-                
+
                 if (intersectMap.containsKey(instance.toString())) {
                     intersectMap.put(instance.toString(), 2);
                 } else {
