@@ -104,13 +104,6 @@ public class DistroConsistencyServiceImpl implements EphemeralConsistencyService
         GlobalExecutor.submitDistroNotifyTask(notifier);
     }
 
-    /**
-     * 将数据存入存储器中
-     *
-     * @param key   key of data, this key should be globally unique
-     * @param value value of data
-     * @throws NacosException
-     */
     @Override
     public void put(String key, Record value) throws NacosException {
         // 本地存储

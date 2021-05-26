@@ -181,15 +181,6 @@ public class NacosNamingService implements NamingService {
         registerInstance(serviceName, groupName, ip, port, Constants.DEFAULT_CLUSTER_NAME);
     }
 
-    /**
-     * 注册服务实例
-     *
-     * @param serviceName name of service
-     * @param ip          instance ip
-     * @param port        instance port
-     * @param clusterName instance cluster name
-     * @throws NacosException
-     */
     @Override
     public void registerInstance(String serviceName, String ip, int port, String clusterName) throws NacosException {
         registerInstance(serviceName, Constants.DEFAULT_GROUP, ip, port, clusterName);

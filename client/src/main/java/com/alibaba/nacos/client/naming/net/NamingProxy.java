@@ -561,11 +561,6 @@ public class NamingProxy implements Closeable {
         
     }
 
-    /**
-     * 获取server地址
-     *
-     * @return
-     */
     private List<String> getServerList() {
         List<String> snapshot = serversFromEndpoint;
         if (!CollectionUtils.isEmpty(serverList)) {
