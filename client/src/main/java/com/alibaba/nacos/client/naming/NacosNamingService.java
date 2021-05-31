@@ -241,11 +241,13 @@ public class NacosNamingService implements NamingService {
     @Override
     public void deregisterInstance(String serviceName, String groupName, String ip, int port, String clusterName)
             throws NacosException {
+        // 创建 instance 实例
         Instance instance = new Instance();
         instance.setIp(ip);
         instance.setPort(port);
         instance.setClusterName(clusterName);
-        
+
+        // 服务下线
         deregisterInstance(serviceName, groupName, instance);
     }
     
@@ -256,10 +258,13 @@ public class NacosNamingService implements NamingService {
     
     @Override
     public void deregisterInstance(String serviceName, String groupName, Instance instance) throws NacosException {
+        // 判断是否是临时节点
         if (instance.isEphemeral()) {
+            // 如果是临时节点，调用 beatReactor 组件移除 beatInfo 心跳任务，不再发送心跳续约
             beatReactor.removeBeatInfo(NamingUtils.getGroupedName(serviceName, groupName), instance.getIp(),
                     instance.getPort());
         }
+        // 服务下线，将 group 与 serviceName 使用@@ 拼接在一起，作为服务的 serviceName
         serverProxy.deregisterService(NamingUtils.getGroupedName(serviceName, groupName), instance);
     }
     

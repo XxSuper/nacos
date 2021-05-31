@@ -259,7 +259,7 @@ public class NamingProxy implements Closeable {
         NAMING_LOGGER
                 .info("[DEREGISTER-SERVICE] {} deregistering service {} with instance: {}", namespaceId, serviceName,
                         instance);
-        
+        // 组装请求参数
         final Map<String, String> params = new HashMap<String, String>(8);
         params.put(CommonParams.NAMESPACE_ID, namespaceId);
         params.put(CommonParams.SERVICE_NAME, serviceName);
@@ -267,7 +267,8 @@ public class NamingProxy implements Closeable {
         params.put("ip", instance.getIp());
         params.put("port", String.valueOf(instance.getPort()));
         params.put("ephemeral", String.valueOf(instance.isEphemeral()));
-        
+
+        // 调用 reqApi 发送请求，请求方式是 delete
         reqApi(UtilAndComs.nacosUrlInstance, params, HttpMethod.DELETE);
     }
     
@@ -548,7 +549,7 @@ public class NamingProxy implements Closeable {
                         NAMING_LOGGER.debug("request {} failed.", server, e);
                     }
                 }
-                // 如果请求异常了，轮训下一个 server
+                // 如果请求异常了，轮询下一个 server
                 index = (index + 1) % servers.size();
             }
         }

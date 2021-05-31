@@ -238,7 +238,8 @@ public class Service extends com.alibaba.nacos.api.naming.pojo.Service implement
         for (String clusterName : clusterMap.keySet()) {
             ipMap.put(clusterName, new ArrayList<>());
         }
-        
+
+        // instance 按 cluster 分组
         for (Instance instance : instances) {
             try {
                 if (instance == null) {

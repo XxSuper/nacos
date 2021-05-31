@@ -30,14 +30,7 @@ import com.alibaba.nacos.naming.consistency.KeyBuilder;
 import com.alibaba.nacos.naming.consistency.RecordListener;
 import com.alibaba.nacos.naming.consistency.persistent.raft.RaftPeer;
 import com.alibaba.nacos.naming.consistency.persistent.raft.RaftPeerSet;
-import com.alibaba.nacos.naming.misc.GlobalExecutor;
-import com.alibaba.nacos.naming.misc.Loggers;
-import com.alibaba.nacos.naming.misc.Message;
-import com.alibaba.nacos.naming.misc.NetUtils;
-import com.alibaba.nacos.naming.misc.ServiceStatusSynchronizer;
-import com.alibaba.nacos.naming.misc.SwitchDomain;
-import com.alibaba.nacos.naming.misc.Synchronizer;
-import com.alibaba.nacos.naming.misc.UtilsAndCommons;
+import com.alibaba.nacos.naming.misc.*;
 import com.alibaba.nacos.naming.pojo.InstanceOperationContext;
 import com.alibaba.nacos.naming.pojo.InstanceOperationInfo;
 import com.alibaba.nacos.naming.push.PushService;
@@ -52,14 +45,7 @@ import org.springframework.util.CollectionUtils;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.StringJoiner;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.LinkedBlockingDeque;
@@ -683,23 +669,32 @@ public class ServiceManager implements RecordListener<Service> {
      */
     public void removeInstance(String namespaceId, String serviceName, boolean ephemeral, Instance... ips)
             throws NacosException {
+        // 获取对应的 service 实例
         Service service = getService(namespaceId, serviceName);
-        
+
+        // 加锁
         synchronized (service) {
             removeInstance(namespaceId, serviceName, ephemeral, service, ips);
         }
     }
-    
+
     private void removeInstance(String namespaceId, String serviceName, boolean ephemeral, Service service,
             Instance... ips) throws NacosException {
-        
+
+        // 生成服务对应的 key，如果是临时节点 key 为 com.alibaba.nacos.naming.iplist.ephemeral.{namespace}##{serviceName}，
+        // 永久节点 key 为 com.alibaba.nacos.naming.iplist.{namespace}##{serviceName}
         String key = KeyBuilder.buildInstanceListKey(namespaceId, serviceName, ephemeral);
-        
+
+        // 返回下线后剩余的 instance 集合，调用 substractIpAddresses 方法用之前的 instance 列表减去要下线的实例列表，生成一份新的在线的实例列表
         List<Instance> instanceList = substractIpAddresses(service, ephemeral, ips);
-        
+
+        // 创建 instances 对象，设置 instance 集合
         Instances instances = new Instances();
         instances.setInstanceList(instanceList);
-        
+
+        // 调用 EphemeralConsistencyService#DistroConsistencyServiceImpl.put()，封装 Datum 与 key 添加到 dataStore 存储组件中，
+        // 接着往 Notifier 的 task队列中添加一个事件通知任务，其实 service 对象里面的 instance 列表并没有更新，
+        // 会有一个后台线程，不停的从 Notifier 组件的 task 队列中取出 task，然后调用 handle 方法进行事件通知，其实就是通知 service 对象的 onChange 方法进行更新操作
         consistencyService.put(key, instances);
     }
     
@@ -813,6 +808,7 @@ public class ServiceManager implements RecordListener<Service> {
         }
         
         for (Instance instance : ips) {
+            // 如果服务中没有对应的 cluster 集群，创建一个并初始化
             if (!service.getClusterMap().containsKey(instance.getClusterName())) {
                 Cluster cluster = new Cluster(instance.getClusterName(), service);
                 cluster.init();
@@ -823,6 +819,7 @@ public class ServiceManager implements RecordListener<Service> {
             }
             
             if (UtilsAndCommons.UPDATE_INSTANCE_ACTION_REMOVE.equals(action)) {
+                // 从 instanceMap 中移除该 instance
                 instanceMap.remove(instance.getDatumKey());
             } else {
                 Instance oldInstance = instanceMap.get(instance.getDatumKey());

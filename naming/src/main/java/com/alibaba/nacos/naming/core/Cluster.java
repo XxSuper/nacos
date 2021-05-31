@@ -274,7 +274,8 @@ public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implement
                 }
             }
         }
-        
+
+        // 新的实例，重新添加到状态管理集合中
         List<Instance> newIPs = subtract(ips, oldIpMap.values());
         if (newIPs.size() > 0) {
             Loggers.EVT_LOG
@@ -285,7 +286,8 @@ public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implement
                 HealthCheckStatus.reset(ip);
             }
         }
-        
+
+        // 待移除的实例，从状态管理集合中移除
         List<Instance> deadIPs = subtract(oldIpMap.values(), ips);
         
         if (deadIPs.size() > 0) {
@@ -311,6 +313,7 @@ public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implement
 
         // 获取新旧 instances 集合的交集
         List<Instance> intersects = (List<Instance>) CollectionUtils.intersection(newInstance, oldInstance);
+        // 新旧 instances 交集集合 <ip:port, instance>
         Map<String, Instance> stringIpAddressMap = new ConcurrentHashMap<>(intersects.size());
 
         // 交集存入 stringIpAddressMap 中
@@ -322,19 +325,21 @@ public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implement
         Map<String, Instance> updatedInstancesMap = new ConcurrentHashMap<>(newInstance.size());
         Map<String, Instance> newInstancesMap = new ConcurrentHashMap<>(newInstance.size());
 
-        // 旧的 instance 集合中交集的部分存入 intersectMap 中，值为 1
         for (Instance instance : oldInstance) {
+            // 旧的 instance 集合中交集的部分存入 intersectMap 中，值为 1
             if (stringIpAddressMap.containsKey(instance.getIp() + ":" + instance.getPort())) {
                 intersectMap.put(instance.toString(), 1);
             }
         }
 
         for (Instance instance : newInstance) {
+            // 新的 instance 集合中交集的部分存入 intersectMap 中
             if (stringIpAddressMap.containsKey(instance.getIp() + ":" + instance.getPort())) {
-
+                // 之前就存在，值为 2
                 if (intersectMap.containsKey(instance.toString())) {
                     intersectMap.put(instance.toString(), 2);
                 } else {
+                    // 之前不存在，值为 1
                     intersectMap.put(instance.toString(), 1);
                 }
             }
@@ -346,7 +351,7 @@ public class Cluster extends com.alibaba.nacos.api.naming.pojo.Cluster implement
         for (Map.Entry<String, Integer> entry : intersectMap.entrySet()) {
             String key = entry.getKey();
             Integer value = entry.getValue();
-            
+            // 值为 1 并且在新加入的 instance 集合中的为本次更新的 instance 集合
             if (value == 1) {
                 if (newInstancesMap.containsKey(key)) {
                     updatedInstancesMap.put(key, newInstancesMap.get(key));
