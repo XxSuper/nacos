@@ -83,12 +83,15 @@ public class ClientBeatCheckTask implements Runnable {
             if (!getSwitchDomain().isHealthCheckEnabled()) {
                 return;
             }
-            
+
+            // 获取 service 下所有的 instance
             List<Instance> instances = service.allIPs(true);
             
-            // first set health status of instances:
+            // first set health status of instances: 遍历
             for (Instance instance : instances) {
+                // 当前时间 - 最后活跃时间 > 配置的超时时间（preserved.heart.beat.timeout 默认15s）
                 if (System.currentTimeMillis() - instance.getLastBeat() > instance.getInstanceHeartBeatTimeOut()) {
+                    // 超时，是否被标记，如果没有并且状态为健康则设置健康状态为 false
                     if (!instance.isMarked()) {
                         if (instance.isHealthy()) {
                             instance.setHealthy(false);
@@ -97,6 +100,7 @@ public class ClientBeatCheckTask implements Runnable {
                                             instance.getIp(), instance.getPort(), instance.getClusterName(),
                                             service.getName(), UtilsAndCommons.LOCALHOST_SITE,
                                             instance.getInstanceHeartBeatTimeOut(), instance.getLastBeat());
+                            // 状态改变
                             getPushService().serviceChanged(service);
                             // 发布心跳超时事件
                             ApplicationUtils.publishEvent(new InstanceHeartbeatTimeoutEvent(this, instance));
@@ -109,13 +113,14 @@ public class ClientBeatCheckTask implements Runnable {
                 return;
             }
             
-            // then remove obsolete instances:
+            // then remove obsolete instances: 遍历所有的实例 instance
             for (Instance instance : instances) {
-                
+                // 如果已经被标记就跳过
                 if (instance.isMarked()) {
                     continue;
                 }
-                
+
+                // 判断实例的 lastBeat 时间距离现在时间是否超过了 30s，如果查过的话，就走 deleteIp 删除这个实例
                 if (System.currentTimeMillis() - instance.getLastBeat() > instance.getIpDeleteTimeout()) {
                     // delete instance
                     Loggers.SRV_LOG.info("[AUTO-DELETE-IP] service: {}, ip: {}", service.getName(),
@@ -133,6 +138,7 @@ public class ClientBeatCheckTask implements Runnable {
     private void deleteIp(Instance instance) {
         
         try {
+            // http 请求到本地进行服务下线
             NamingProxy.Request request = NamingProxy.Request.newRequest();
             request.appendParam("ip", instance.getIp()).appendParam("port", String.valueOf(instance.getPort()))
                     .appendParam("ephemeral", "true").appendParam("clusterName", instance.getClusterName())
@@ -141,7 +147,7 @@ public class ClientBeatCheckTask implements Runnable {
             String url = "http://" + IPUtil.localHostIP() + IPUtil.IP_PORT_SPLITER + EnvUtil.getPort() + EnvUtil.getContextPath()
                     + UtilsAndCommons.NACOS_NAMING_CONTEXT + "/instance?" + request.toUrl();
             
-            // delete instance asynchronously:
+            // delete instance asynchronously: 异步发送请求下线
             HttpClient.asyncHttpDelete(url, null, null, new Callback<String>() {
                 @Override
                 public void onReceive(RestResult<String> result) {

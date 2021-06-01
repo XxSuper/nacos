@@ -498,8 +498,10 @@ public class InstanceController {
         String serviceName = WebUtils.required(request, CommonParams.SERVICE_NAME);
         NamingUtils.checkServiceNameFormat(serviceName);
         Loggers.SRV_LOG.debug("[CLIENT-BEAT] full arguments: beat: {}, serviceName: {}", clientBeat, serviceName);
+        // 获取对应的 instance 对象，根据 namespace 从 serviceManager#serviceMap 中获取对应的 service，接着根据 service#cluster
+        // 从 service 的 clusterMap 中获取对应 cluster 的 instance 集合，然后再遍历比对 ip 与 port
         Instance instance = serviceManager.getInstance(namespaceId, serviceName, clusterName, ip, port);
-        
+        // 如果没有找到对应的 instance，而且 beatInfo 不是 null，会根据心跳信息注册一个 instance 对象
         if (instance == null) {
             if (clientBeat == null) {
                 result.put(CommonParams.CODE, NamingResponseCode.RESOURCE_NOT_FOUND);
@@ -521,7 +523,8 @@ public class InstanceController {
             
             serviceManager.registerInstance(namespaceId, serviceName, instance);
         }
-        
+
+        // 根据 namespace 与 serviceName 获取对应的服务 service
         Service service = serviceManager.getService(namespaceId, serviceName);
         
         if (service == null) {
@@ -534,12 +537,16 @@ public class InstanceController {
             clientBeat.setPort(port);
             clientBeat.setCluster(clusterName);
         }
+        // 处理心跳
         service.processClientBeat(clientBeat);
         
         result.put(CommonParams.CODE, NamingResponseCode.OK);
+        // 如果 instance 中有 preserved.heart.beat.interval 参数就带回给客户端
         if (instance.containsMetadata(PreservedMetadataKeys.HEART_BEAT_INTERVAL)) {
+            // 设置心跳间隔
             result.put(SwitchEntry.CLIENT_BEAT_INTERVAL, instance.getInstanceHeartBeatInterval());
         }
+        // 心跳信息会否带 beatInfo
         result.put(SwitchEntry.LIGHT_BEAT_ENABLED, switchDomain.isLightBeatEnabled());
         return result;
     }

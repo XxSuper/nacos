@@ -60,6 +60,7 @@ public class BeatReactor implements Closeable {
     
     public BeatReactor(NamingProxy serverProxy, int threadCount) {
         this.serverProxy = serverProxy;
+        // 创建任务线程池，线程数：如果 CPU 核心数大于1，则为 CPU 核心数/2
         this.executorService = new ScheduledThreadPoolExecutor(threadCount, new ThreadFactory() {
             @Override
             public Thread newThread(Runnable r) {
@@ -79,15 +80,18 @@ public class BeatReactor implements Closeable {
      */
     public void addBeatInfo(String serviceName, BeatInfo beatInfo) {
         NAMING_LOGGER.info("[BEAT] adding beat: {} to beat map.", beatInfo);
+        // 生成一个 key
         String key = buildKey(serviceName, beatInfo.getIp(), beatInfo.getPort());
         BeatInfo existBeat = null;
-        //fix #1733
+        //fix #1733，停用之前的 beat
         if ((existBeat = dom2Beat.remove(key)) != null) {
             existBeat.setStopped(true);
         }
+        // 放入 dom2Beat 集合中，作用是防止任务重复
         dom2Beat.put(key, beatInfo);
-        // 创建心跳定时任务
+        // 创建心跳定时任务塞到任务调度线程池，默认延迟 5s 执行
         executorService.schedule(new BeatTask(beatInfo), beatInfo.getPeriod(), TimeUnit.MILLISECONDS);
+        // 监控
         MetricsMonitor.getDom2BeatSizeMonitor().set(dom2Beat.size());
     }
     
@@ -160,12 +164,16 @@ public class BeatReactor implements Closeable {
         
         @Override
         public void run() {
+            // 判断是否停止
             if (beatInfo.isStopped()) {
                 return;
             }
+            // 获取心跳间隔
             long nextTime = beatInfo.getPeriod();
             try {
+                // 向服务端发送心跳
                 JsonNode result = serverProxy.sendBeat(beatInfo, BeatReactor.this.lightBeatEnabled);
+                // 服务端响应中获取发送心跳间隔与 lightBeatEnabled 配置
                 long interval = result.get("clientBeatInterval").asLong();
                 boolean lightBeatEnabled = false;
                 if (result.has(CommonParams.LIGHT_BEAT_ENABLED)) {
@@ -190,6 +198,7 @@ public class BeatReactor implements Closeable {
                     instance.setInstanceId(instance.getInstanceId());
                     instance.setEphemeral(true);
                     try {
+                        // 如果返回 NamingResponseCode.RESOURCE_NOT_FOUND，则会创建一个 instance 对象，进行服务注册
                         serverProxy.registerService(beatInfo.getServiceName(),
                                 NamingUtils.getGroupName(beatInfo.getServiceName()), instance);
                     } catch (Exception ignore) {
@@ -203,6 +212,7 @@ public class BeatReactor implements Closeable {
                 NAMING_LOGGER.error("[CLIENT-BEAT] failed to send beat: {}, unknown exception msg: {}",
                         JacksonUtils.toJson(beatInfo), unknownEx.getMessage(), unknownEx);
             } finally {
+                // 继续添加心跳任务到任务调度线程池中，使用 nextTime 时间进行调度，间隔可能已经被调整
                 executorService.schedule(new BeatTask(beatInfo), nextTime, TimeUnit.MILLISECONDS);
             }
         }

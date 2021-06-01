@@ -65,6 +65,7 @@ public class ClientBeatProcessor implements Runnable {
     @Override
     public void run() {
         Service service = this.service;
+        // 判断事件 log 是否开启，使用参数 com.alibaba.nacos.naming.event 开启
         if (Loggers.EVT_LOG.isDebugEnabled()) {
             Loggers.EVT_LOG.debug("[CLIENT-BEAT] processing beat: {}", rsInfo.toString());
         }
@@ -72,21 +73,28 @@ public class ClientBeatProcessor implements Runnable {
         String ip = rsInfo.getIp();
         String clusterName = rsInfo.getCluster();
         int port = rsInfo.getPort();
+
+        // 获取对应的 cluster
         Cluster cluster = service.getClusterMap().get(clusterName);
+        // 获取集群下的 instances 集合
         List<Instance> instances = cluster.allIPs(true);
         
         for (Instance instance : instances) {
+            // 找到 ip 与 port 对应的 instance
             if (instance.getIp().equals(ip) && instance.getPort() == port) {
                 if (Loggers.EVT_LOG.isDebugEnabled()) {
                     Loggers.EVT_LOG.debug("[CLIENT-BEAT] refresh beat: {}", rsInfo.toString());
                 }
+                // 设置最后活跃时间
                 instance.setLastBeat(System.currentTimeMillis());
+                // 如果不健康，设置为健康
                 if (!instance.isMarked() && !instance.isHealthy()) {
                     instance.setHealthy(true);
                     Loggers.EVT_LOG
                             .info("service: {} {POS} {IP-ENABLED} valid: {}:{}@{}, region: {}, msg: client beat ok",
                                     cluster.getService().getName(), ip, port, cluster.getName(),
                                     UtilsAndCommons.LOCALHOST_SITE);
+                    // service 状态改变
                     getPushService().serviceChanged(service);
                 }
             }

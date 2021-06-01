@@ -421,8 +421,10 @@ public class NamingProxy implements Closeable {
         if (NAMING_LOGGER.isDebugEnabled()) {
             NAMING_LOGGER.debug("[BEAT] {} sending beat to server: {}", namespaceId, beatInfo.toString());
         }
+        // 封装请求参数
         Map<String, String> params = new HashMap<String, String>(8);
         Map<String, String> bodyMap = new HashMap<String, String>(2);
+        // lightBeatEnabled 作用：发送心跳请求是否将 beatInfo 信息带过去
         if (!lightBeatEnabled) {
             bodyMap.put("beat", JacksonUtils.toJson(beatInfo));
         }
@@ -431,6 +433,7 @@ public class NamingProxy implements Closeable {
         params.put(CommonParams.CLUSTER_NAME, beatInfo.getCluster());
         params.put("ip", beatInfo.getIp());
         params.put("port", String.valueOf(beatInfo.getPort()));
+        // 调用 reqApi 方法发送心跳请求
         String result = reqApi(UtilAndComs.nacosUrlBase + "/instance/beat", params, bodyMap, HttpMethod.PUT);
         return JacksonUtils.toObj(result);
     }

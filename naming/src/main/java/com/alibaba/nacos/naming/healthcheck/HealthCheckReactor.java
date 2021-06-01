@@ -51,6 +51,7 @@ public class HealthCheckReactor {
      * @param task client beat check task
      */
     public static void scheduleCheck(ClientBeatCheckTask task) {
+        // 向健康检查线程池中提交检查任务，返回 future，将 future 存到 futureMap 中
         futureMap.computeIfAbsent(task.taskKey(),
                 k -> GlobalExecutor.scheduleNamingHealth(task, 5000, 5000, TimeUnit.MILLISECONDS));
     }
