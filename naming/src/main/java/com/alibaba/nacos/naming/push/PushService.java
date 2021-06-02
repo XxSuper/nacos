@@ -631,7 +631,8 @@ public class PushService implements ApplicationContextAware, ApplicationListener
             udpSocket.send(ackEntry.origin);
             
             ackEntry.increaseRetryTime();
-            
+
+            // 当收到 receiver 包会移除 ackMap、udpSendTimeMap，receiver 线程在 pushService 初始化时开启
             GlobalExecutor.scheduleRetransmitter(new Retransmitter(ackEntry),
                     TimeUnit.NANOSECONDS.toMillis(ACK_TIMEOUT_NANOS), TimeUnit.MILLISECONDS);
             
