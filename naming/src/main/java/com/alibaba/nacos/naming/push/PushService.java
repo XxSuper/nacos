@@ -125,6 +125,7 @@ public class PushService implements ApplicationContextAware, ApplicationListener
         Future future = GlobalExecutor.scheduleUdpSender(() -> {
             try {
                 Loggers.PUSH.info(serviceName + " is changed, add it to push queue.");
+                // clientMap 集合中获取 pushClient 集合
                 ConcurrentMap<String, PushClient> clients = clientMap
                         .get(UtilsAndCommons.assembleFullServiceName(namespaceId, serviceName));
                 if (MapUtils.isEmpty(clients)) {
@@ -132,7 +133,9 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                 }
                 
                 Map<String, Object> cache = new HashMap<>(16);
+                // 最后一次更新时间
                 long lastRefTime = System.nanoTime();
+                // 遍历 pushClient 集合
                 for (PushClient client : clients.values()) {
                     if (client.zombie()) {
                         Loggers.PUSH.debug("client is zombie: " + client.toString());
@@ -143,10 +146,12 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                     
                     Receiver.AckEntry ackEntry;
                     Loggers.PUSH.debug("push serviceName: {} to client: {}", serviceName, client.toString());
+                    // 创建 pushCacheKey
                     String key = getPushCacheKey(serviceName, client.getIp(), client.getAgent());
                     byte[] compressData = null;
                     Map<String, Object> data = null;
                     if (switchDomain.getDefaultPushCacheMillis() >= 20000 && cache.containsKey(key)) {
+                        // 缓存存在直接从缓存中获取
                         org.javatuples.Pair pair = (org.javatuples.Pair) cache.get(key);
                         compressData = (byte[]) (pair.getValue0());
                         data = (Map<String, Object>) pair.getValue1();
@@ -159,6 +164,7 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                     } else {
                         ackEntry = prepareAckEntry(client, prepareHostsData(client), lastRefTime);
                         if (ackEntry != null) {
+                            // 放入缓存
                             cache.put(key, new org.javatuples.Pair<>(ackEntry.origin.getData(), ackEntry.data));
                         }
                     }
@@ -166,7 +172,8 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                     Loggers.PUSH.info("serviceName: {} changed, schedule push for: {}, agent: {}, key: {}",
                             client.getServiceName(), client.getAddrStr(), client.getAgent(),
                             (ackEntry == null ? null : ackEntry.key));
-                    
+
+                    // udp 推送
                     udpPush(ackEntry);
                 }
             } catch (Exception e) {
@@ -204,9 +211,10 @@ public class PushService implements ApplicationContextAware, ApplicationListener
      */
     public void addClient(String namespaceId, String serviceName, String clusters, String agent,
             InetSocketAddress socketAddr, DataSource dataSource, String tenant, String app) {
-        
+        // 创建 pushClient 对象
         PushClient client = new PushClient(namespaceId, serviceName, clusters, agent, socketAddr, dataSource, tenant,
                 app);
+        // 添加
         addClient(client);
     }
     
@@ -217,17 +225,22 @@ public class PushService implements ApplicationContextAware, ApplicationListener
      */
     public void addClient(PushClient client) {
         // client is stored by key 'serviceName' because notify event is driven by serviceName change
+        // namespace##serviceName
         String serviceKey = UtilsAndCommons.assembleFullServiceName(client.getNamespaceId(), client.getServiceName());
         ConcurrentMap<String, PushClient> clients = clientMap.get(serviceKey);
+        // 之前不存在
         if (clients == null) {
             clientMap.putIfAbsent(serviceKey, new ConcurrentHashMap<>(1024));
             clients = clientMap.get(serviceKey);
         }
-        
+
+        // 如果之前存在就刷新一下之前的
         PushClient oldClient = clients.get(client.toString());
         if (oldClient != null) {
+            // 更新 lastRefTime 字段
             oldClient.refresh();
         } else {
+            // 如果之前没有添加过，添加进去
             PushClient res = clients.putIfAbsent(client.toString(), client);
             if (res != null) {
                 Loggers.PUSH.warn("client: {} already associated with key {}", res.getAddrStr(), res.toString());
@@ -346,6 +359,7 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                 lastRefTime);
         DatagramPacket packet = null;
         try {
+            // 创建 udp 数据包
             packet = new DatagramPacket(dataBytes, dataBytes.length, client.socketAddr);
             Receiver.AckEntry ackEntry = new Receiver.AckEntry(key, packet);
             // we must store the key be fore send, otherwise there will be a chance the
@@ -586,6 +600,7 @@ public class PushService implements ApplicationContextAware, ApplicationListener
     private static Map<String, Object> prepareHostsData(PushClient client) throws Exception {
         Map<String, Object> cmd = new HashMap<String, Object>(2);
         cmd.put("type", "dom");
+        // 获取数据
         cmd.put("data", client.getDataSource().getData(client));
         
         return cmd;

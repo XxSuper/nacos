@@ -388,7 +388,7 @@ public class InstanceController {
     @GetMapping("/list")
     @Secured(parser = NamingResourceParser.class, action = ActionTypes.READ)
     public ObjectNode list(HttpServletRequest request) throws Exception {
-        
+        // 解析参数
         String namespaceId = WebUtils.optional(request, CommonParams.NAMESPACE_ID, Constants.DEFAULT_NAMESPACE_ID);
         String serviceName = WebUtils.required(request, CommonParams.SERVICE_NAME);
         NamingUtils.checkServiceNameFormat(serviceName);
@@ -405,7 +405,7 @@ public class InstanceController {
         String tenant = WebUtils.optional(request, "tid", StringUtils.EMPTY);
         
         boolean healthyOnly = Boolean.parseBoolean(WebUtils.optional(request, "healthyOnly", "false"));
-        
+
         return doSrvIpxt(namespaceId, serviceName, agent, clusters, clientIP, udpPort, env, isCheck, app, tenant,
                 healthyOnly);
     }
@@ -681,13 +681,16 @@ public class InstanceController {
         
         ClientInfo clientInfo = new ClientInfo(agent);
         ObjectNode result = JacksonUtils.createEmptyJsonNode();
+        // 根据 namespace 与 serviceName 到 ServiceManager 下的 serviceMap 获取对应的 service 对象
         Service service = serviceManager.getService(namespaceId, serviceName);
+        // 默认 cache 时间
         long cacheMillis = switchDomain.getDefaultCacheMillis();
         
         // now try to enable the push
         try {
+            // 根据 udp 端口、客户端语言、版本等信息判断是否可以推送，如果可以，添加该客户端
             if (udpPort > 0 && pushService.canEnablePush(agent)) {
-                
+                // pushService 组件是用来进行推送的，比如我们订阅了某个服务，该服务下面的实例信息发生了变化，pushService 组件就会通知所有的订阅客户端，将新的数据推送给客户端
                 pushService
                         .addClient(namespaceId, serviceName, clusters, agent, new InetSocketAddress(clientIP, udpPort),
                                 pushDataSource, tid, app);
@@ -698,7 +701,8 @@ public class InstanceController {
                     .error("[NACOS-API] failed to added push client {}, {}:{}", clientInfo, clientIP, udpPort, e);
             cacheMillis = switchDomain.getDefaultCacheMillis();
         }
-        
+
+        // service 为 null，组装响应参数返回给客户端
         if (service == null) {
             if (Loggers.SRV_LOG.isDebugEnabled()) {
                 Loggers.SRV_LOG.debug("no instance to serve for service: {}", serviceName);
@@ -709,18 +713,21 @@ public class InstanceController {
             result.replace("hosts", JacksonUtils.createEmptyArrayNode());
             return result;
         }
-        
+
+        // 检查 service 可不可用
         checkIfDisabled(service);
-        
+
+        // 根据 cluster 获取这个 service 下面的 instance 列表
         List<Instance> srvedIPs;
         
         srvedIPs = service.srvIPs(Arrays.asList(StringUtils.split(clusters, ",")));
         
-        // filter ips using selector:
+        // filter ips using selector: 获取 selector，使用 selector 过滤实例集合
         if (service.getSelector() != null && StringUtils.isNotBlank(clientIP)) {
             srvedIPs = service.getSelector().select(clientIP, srvedIPs);
         }
-        
+
+        // instance 列表为空，组装响应参数返回给客户端
         if (CollectionUtils.isEmpty(srvedIPs)) {
             
             if (Loggers.SRV_LOG.isDebugEnabled()) {
@@ -749,35 +756,42 @@ public class InstanceController {
         Map<Boolean, List<Instance>> ipMap = new HashMap<>(2);
         ipMap.put(Boolean.TRUE, new ArrayList<>());
         ipMap.put(Boolean.FALSE, new ArrayList<>());
-        
+
+        // 遍历，将健康与不健康实例分开
         for (Instance ip : srvedIPs) {
             ipMap.get(ip.isHealthy()).add(ip);
         }
-        
+
+        // 判断是否检查，默认是 false
         if (isCheck) {
             result.put("reachProtectThreshold", false);
         }
-        
+
+        // 保护阀值
         double threshold = service.getProtectThreshold();
-        
+
+        // 健康的 instance 比例小于保护阀值，从而达到活着实例数量低于某个阈值后不进行服务摘除的效果
         if ((float) ipMap.get(Boolean.TRUE).size() / srvedIPs.size() <= threshold) {
             
             Loggers.SRV_LOG.warn("protect threshold reached, return all ips, service: {}", serviceName);
             if (isCheck) {
                 result.put("reachProtectThreshold", true);
             }
-            
+
+            // 将所有的不健康的实例添加到健康实例集合里面
             ipMap.get(Boolean.TRUE).addAll(ipMap.get(Boolean.FALSE));
             ipMap.get(Boolean.FALSE).clear();
         }
-        
+
+
         if (isCheck) {
             result.put("protectThreshold", service.getProtectThreshold());
             result.put("reachLocalSiteCallThreshold", false);
             
             return JacksonUtils.createEmptyJsonNode();
         }
-        
+
+        // 遍历 ipMap 集合，保留 Boolean.TRUE 与可用的服务，塞到 hosts 这个 map 中最后封装返回结果
         ArrayNode hosts = JacksonUtils.createEmptyArrayNode();
         
         for (Map.Entry<Boolean, List<Instance>> entry : ipMap.entrySet()) {
@@ -819,7 +833,8 @@ public class InstanceController {
                 
             }
         }
-        
+
+        // 返回结果给客户端
         result.replace("hosts", hosts);
         if (clientInfo.type == ClientInfo.ClientType.JAVA
                 && clientInfo.version.compareTo(VersionUtil.parseVersion("1.0.0")) >= 0) {

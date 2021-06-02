@@ -36,18 +36,8 @@ import com.alibaba.nacos.common.utils.JacksonUtils;
 import com.alibaba.nacos.common.utils.StringUtils;
 import com.alibaba.nacos.common.utils.ThreadUtils;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 
 import static com.alibaba.nacos.client.utils.LogUtils.NAMING_LOGGER;
 
@@ -124,6 +114,7 @@ public class HostReactor implements Closeable {
     }
     
     public synchronized ScheduledFuture<?> addTask(UpdateTask task) {
+        // 延迟 1s 执行
         return executor.schedule(task, DEFAULT_DELAY, TimeUnit.MILLISECONDS);
     }
     
@@ -286,7 +277,7 @@ public class HostReactor implements Closeable {
     }
     
     private ServiceInfo getServiceInfo0(String serviceName, String clusters) {
-        
+        // key name@@clusters
         String key = ServiceInfo.getKey(serviceName, clusters);
         
         return serviceInfoMap.get(key);
@@ -294,6 +285,7 @@ public class HostReactor implements Closeable {
     
     public ServiceInfo getServiceInfoDirectlyFromServer(final String serviceName, final String clusters)
             throws NacosException {
+        // 调用 serverProxy 组件的 queryList() 方法，udp 端口为 0，udp 是给订阅接收通知用的，这里不订阅
         String result = serverProxy.queryList(serviceName, clusters, 0, false);
         if (StringUtils.isNotEmpty(result)) {
             return JacksonUtils.toObj(result, ServiceInfo.class);
@@ -304,28 +296,37 @@ public class HostReactor implements Closeable {
     public ServiceInfo getServiceInfo(final String serviceName, final String clusters) {
         
         NAMING_LOGGER.debug("failover-mode: " + failoverReactor.isFailoverSwitch());
+        // 如果 clusters 不为空，则为 name@@clusters
         String key = ServiceInfo.getKey(serviceName, clusters);
+        // 判断是否开启了 failover
         if (failoverReactor.isFailoverSwitch()) {
             return failoverReactor.getService(key);
         }
-        
+
+        // 根据 clusters 与 serviceName 生成一个订阅 key，先从本地缓存表中获取 serviceInfo
         ServiceInfo serviceObj = getServiceInfo0(serviceName, clusters);
-        
+
         if (null == serviceObj) {
+            // 如果没有的话，创建 serviceInfo 对象
             serviceObj = new ServiceInfo(serviceName, clusters);
-            
+
+            // 存入本地缓存表中
             serviceInfoMap.put(serviceObj.getKey(), serviceObj);
-            
+
+            // 添加到更新 map 中，表示当前 serviceName 正在更新中
             updatingMap.put(serviceName, new Object());
+            // 立即更新服务
             updateServiceNow(serviceName, clusters);
+            // 更新结束移除
             updatingMap.remove(serviceName);
             
-        } else if (updatingMap.containsKey(serviceName)) {
+        } else if (updatingMap.containsKey(serviceName)) {// updatingMap 中存在 serviceName 表示服务正在更新中
             
             if (UPDATE_HOLD_INTERVAL > 0) {
                 // hold a moment waiting for update finish
                 synchronized (serviceObj) {
                     try {
+                        // 等待 5s 更新，如果提前有了数据，会有线程通知然后唤醒这个等待的线程
                         serviceObj.wait(UPDATE_HOLD_INTERVAL);
                     } catch (InterruptedException e) {
                         NAMING_LOGGER
@@ -355,6 +356,7 @@ public class HostReactor implements Closeable {
      * @param clusters    clusters
      */
     public void scheduleUpdateIfAbsent(String serviceName, String clusters) {
+        // 从 futureMap 中获取，存在直接返回
         if (futureMap.get(ServiceInfo.getKey(serviceName, clusters)) != null) {
             return;
         }
@@ -363,7 +365,8 @@ public class HostReactor implements Closeable {
             if (futureMap.get(ServiceInfo.getKey(serviceName, clusters)) != null) {
                 return;
             }
-            
+
+            // 调用 addTask 添加一个 task，返回 future，将 future 缓存到 futureMap 中
             ScheduledFuture<?> future = addTask(new UpdateTask(serviceName, clusters));
             futureMap.put(ServiceInfo.getKey(serviceName, clusters), future);
         }
@@ -376,11 +379,12 @@ public class HostReactor implements Closeable {
      * @param clusters    clusters
      */
     public void updateService(String serviceName, String clusters) throws NacosException {
+        // 获取老的 serviceInfo
         ServiceInfo oldService = getServiceInfo0(serviceName, clusters);
         try {
-            
+            // 发送请求获取服务实例列表，pushReceiver.getUdpPort()获取一个 udp 端口，pushReceiver 组件用来接收 nacos 服务端推送
             String result = serverProxy.queryList(serviceName, clusters, pushReceiver.getUdpPort(), false);
-            
+            // 处理结果
             if (StringUtils.isNotEmpty(result)) {
                 processServiceJson(result);
             }
@@ -453,40 +457,55 @@ public class HostReactor implements Closeable {
             long delayTime = DEFAULT_DELAY;
             
             try {
+                // 先从 serviceInfoMap 本地缓存中获取订阅的服务信息 serviceInfo
                 ServiceInfo serviceObj = serviceInfoMap.get(ServiceInfo.getKey(serviceName, clusters));
-                
+
+                // 如果是 null 立即更新 service
                 if (serviceObj == null) {
+                    // 更新服务信息，直接从服务端拉取
                     updateService(serviceName, clusters);
                     return;
                 }
-                
+
+                // 如果缓存中 serviceInfo 信息的最后更新时间小于任务里面维护的最后更新时间，说明 serviceInfoMap 缓存中的服务信息过时，调用 updateService 方法拉取
                 if (serviceObj.getLastRefTime() <= lastRefTime) {
+                    // 更新服务信息
                     updateService(serviceName, clusters);
+                    // 获取新的服务信息
                     serviceObj = serviceInfoMap.get(ServiceInfo.getKey(serviceName, clusters));
                 } else {
                     // if serviceName already updated by push, we should not override it
                     // since the push data may be different from pull through force push
+                    // 刷新，告知服务端要订阅哪个服务
                     refreshOnly(serviceName, clusters);
                 }
-                
+
+                // 服务最后更新时间
                 lastRefTime = serviceObj.getLastRefTime();
-                
+
+                // 如果 notifier 组件没有订阅这个服务并且 futureMap（任务集合）里面不存在，说明任务被停了，直接 return
                 if (!notifier.isSubscribed(serviceName, clusters) && !futureMap
                         .containsKey(ServiceInfo.getKey(serviceName, clusters))) {
                     // abort the update task
                     NAMING_LOGGER.info("update task is stopped, service:" + serviceName + ", clusters:" + clusters);
                     return;
                 }
+
+                // 如果 hosts 实例集合是空的，则增加失败次数并返回
                 if (CollectionUtils.isEmpty(serviceObj.getHosts())) {
                     incFailCount();
                     return;
                 }
+                // 该值由服务端决定，如果被订阅了则为10s
                 delayTime = serviceObj.getCacheMillis();
+                // 重置失败次数
                 resetFailCount();
             } catch (Throwable e) {
+                // 增加失败次数
                 incFailCount();
                 NAMING_LOGGER.warn("[NA] failed to update serviceName: " + serviceName, e);
             } finally {
+                // 放入调度线程池中执行，正常情况延迟 10s，失败次数多了会延迟，但不会超过60s
                 executor.schedule(this, Math.min(delayTime << failCount, DEFAULT_DELAY * 60), TimeUnit.MILLISECONDS);
             }
         }
