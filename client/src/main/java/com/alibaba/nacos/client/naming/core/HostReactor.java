@@ -102,9 +102,11 @@ public class HostReactor implements Closeable {
         this.pushEmptyProtection = pushEmptyProtection;
         this.updatingMap = new ConcurrentHashMap<String, Object>();
         this.failoverReactor = new FailoverReactor(this, cacheDir);
+        // 用于接收服务端推送数据
         this.pushReceiver = new PushReceiver(this);
         this.notifier = new InstancesChangeNotifier();
-        
+
+        // 注册事件通知器，PushReceiver 接收到消息后，调用 hostReactor##processServiceJson，如果实例发生变化调用 NotifyCenter.publishEvent 进行事件通知
         NotifyCenter.registerToPublisher(InstancesChangeEvent.class, 16384);
         NotifyCenter.registerSubscriber(notifier);
     }
@@ -126,7 +128,9 @@ public class HostReactor implements Closeable {
      * @param eventListener custom listener
      */
     public void subscribe(String serviceName, String clusters, EventListener eventListener) {
+        // 注册监听器
         notifier.registerListener(serviceName, clusters, eventListener);
+        // hostReactor 组件获取 serviceInfo 信息
         getServiceInfo(serviceName, clusters);
     }
     
@@ -146,17 +150,19 @@ public class HostReactor implements Closeable {
     }
     
     /**
-     * Process service json.
+     * Process service json. 新的服务实例信息替换本地缓存的服务实例信息，拿新通知的服务实例列表信息与本地缓存的实例列表信息进行比较，看看有没有发生变化，如果有的话，就通知 EventDispatcher 组件
      *
      * @param json service json
      * @return service info
      */
     public ServiceInfo processServiceJson(String json) {
+        // 反序列化成 serviceInfo
         ServiceInfo serviceInfo = JacksonUtils.toObj(json, ServiceInfo.class);
         String serviceKey = serviceInfo.getKey();
         if (serviceKey == null) {
             return null;
         }
+        // 获取老的 serviceInfo
         ServiceInfo oldService = serviceInfoMap.get(serviceKey);
         
         if (pushEmptyProtection && !serviceInfo.validate()) {
@@ -172,7 +178,8 @@ public class HostReactor implements Closeable {
                 NAMING_LOGGER.warn("out of date data received, old-t: " + oldService.getLastRefTime() + ", new-t: "
                         + serviceInfo.getLastRefTime());
             }
-            
+
+            // 将新接收的服务实例信息塞入缓存
             serviceInfoMap.put(serviceInfo.getKey(), serviceInfo);
             
             Map<String, Instance> oldHostMap = new HashMap<String, Instance>(oldService.getHosts().size());
@@ -196,11 +203,13 @@ public class HostReactor implements Closeable {
                 String key = entry.getKey();
                 if (oldHostMap.containsKey(key) && !StringUtils
                         .equals(host.toString(), oldHostMap.get(key).toString())) {
+                    // 修改的实例
                     modHosts.add(host);
                     continue;
                 }
                 
                 if (!oldHostMap.containsKey(key)) {
+                    // 新的实例
                     newHosts.add(host);
                 }
             }
@@ -211,7 +220,8 @@ public class HostReactor implements Closeable {
                 if (newHostMap.containsKey(key)) {
                     continue;
                 }
-                
+
+                // 要移除的实例
                 if (!newHostMap.containsKey(key)) {
                     remvHosts.add(host);
                 }
@@ -240,6 +250,7 @@ public class HostReactor implements Closeable {
             serviceInfo.setJsonFromServer(json);
             
             if (newHosts.size() > 0 || remvHosts.size() > 0 || modHosts.size() > 0) {
+                // 从服务端获取实例列表与本地缓存比较如果发生变化，则进行事件通知
                 NotifyCenter.publishEvent(new InstancesChangeEvent(serviceInfo.getName(), serviceInfo.getGroupName(),
                         serviceInfo.getClusters(), serviceInfo.getHosts()));
                 DiskCache.write(serviceInfo, cacheDir);
@@ -250,6 +261,7 @@ public class HostReactor implements Closeable {
             NAMING_LOGGER.info("init new ips(" + serviceInfo.ipCount() + ") service: " + serviceInfo.getKey() + " -> "
                     + JacksonUtils.toJson(serviceInfo.getHosts()));
             serviceInfoMap.put(serviceInfo.getKey(), serviceInfo);
+            // 服务实例信息发生变化，HostReactor 初始化时注册事件监听器
             NotifyCenter.publishEvent(new InstancesChangeEvent(serviceInfo.getName(), serviceInfo.getGroupName(),
                     serviceInfo.getClusters(), serviceInfo.getHosts()));
             serviceInfo.setJsonFromServer(json);

@@ -100,7 +100,9 @@ public class DistroConsistencyServiceImpl implements EphemeralConsistencyService
     
     @PostConstruct
     public void init() {
-        // 初始化时提交了一个任务
+        // 初始化时提交了启动一个任务扫描 Notifier##tasks 集合中的任务，服务实例变化会调用 DistroConsistencyServiceImpl##onPut 将数据保存到缓存，同时添加一个任务到 Notifier##tasks 集合中
+        // 扫描到任务后会调用对应的 listener 监听器进行通知，listener 是在 Service 创建后进行初始化时添加的，ServiceManager##putServiceAndInit=》consistencyService.listen
+        // 监听器收到通知后会调用 Service##onChange 方法，让 service 修改内存中维护的实例信息，修改完后会调用 getPushService().serviceChanged(this) 找到 push 服务，向订阅了这个服务的客户端推送最新的服务实例信息
         GlobalExecutor.submitDistroNotifyTask(notifier);
     }
 
@@ -439,7 +441,7 @@ public class DistroConsistencyServiceImpl implements EphemeralConsistencyService
                     try {
                         // 通知数据已经改变
                         if (action == DataOperation.CHANGE) {
-                            // 将 key 对应的实例列表传过去
+                            // 将 key 对应的实例列表传过去，会调用 Service##onChange =》 PushService##serviceChanged（通知）=》PushService##onApplicationEvent（推送）
                             listener.onChange(datumKey, dataStore.get(datumKey).value);
                             continue;
                         }

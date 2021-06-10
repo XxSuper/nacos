@@ -285,7 +285,7 @@ public class NotifyCenter {
         }
         
         final String topic = ClassUtils.getCanonicalName(eventType);
-        
+        // HostReactor 创建时会调用 registerToPublisher、registerSubscriber 进行注册，事件类型为 InstancesChangeEvent
         EventPublisher publisher = INSTANCE.publisherMap.get(topic);
         if (publisher != null) {
             return publisher.publish(event);

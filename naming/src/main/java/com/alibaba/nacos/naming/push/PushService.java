@@ -89,17 +89,21 @@ public class PushService implements ApplicationContextAware, ApplicationListener
     
     static {
         try {
+            // 创建 udp socket，接收 client ack 任务
             udpSocket = new DatagramSocket();
-            
+
+            // 启动一个线程，执行 Receiver 任务，该任务的作用是接收客户端 ack，向客户端推送最新的服务实例信息后，会向服务端回一个 ack
             Receiver receiver = new Receiver();
             
             Thread inThread = new Thread(receiver);
             inThread.setDaemon(true);
             inThread.setName("com.alibaba.nacos.naming.push.receiver");
             inThread.start();
-            
+
+            // 启动一个定时任务 20s 执行一次，清理下僵尸客户端，就是处理掉几秒没刷新订阅的客户端，默认是 10s
             GlobalExecutor.scheduleRetransmitter(() -> {
                 try {
+                    // clientMap 客户端集合中的数据是在 InstanceController##list=>InstanceController##doSrvIpxt 时添加的
                     removeClientIfZombie();
                 } catch (Throwable e) {
                     Loggers.PUSH.warn("[NACOS-PUSH] failed to remove client zombie");
@@ -121,11 +125,12 @@ public class PushService implements ApplicationContextAware, ApplicationListener
         Service service = event.getService();
         String serviceName = service.getName();
         String namespaceId = service.getNamespaceId();
-        
+
+        // 生成一个 future，放到一个任务调度线程池中执行，延迟 1s
         Future future = GlobalExecutor.scheduleUdpSender(() -> {
             try {
                 Loggers.PUSH.info(serviceName + " is changed, add it to push queue.");
-                // clientMap 集合中获取 pushClient 集合
+                // clientMap 集合中获取 pushClient 集合，clientMap 中的数据是在 InstanceController##list=>InstanceController##doSrvIpxt 时添加的
                 ConcurrentMap<String, PushClient> clients = clientMap
                         .get(UtilsAndCommons.assembleFullServiceName(namespaceId, serviceName));
                 if (MapUtils.isEmpty(clients)) {
@@ -135,8 +140,9 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                 Map<String, Object> cache = new HashMap<>(16);
                 // 最后一次更新时间
                 long lastRefTime = System.nanoTime();
-                // 遍历 pushClient 集合
+                // 遍历 pushClient 客户端集合
                 for (PushClient client : clients.values()) {
+                    // 如果是僵尸客户端则移除
                     if (client.zombie()) {
                         Loggers.PUSH.debug("client is zombie: " + client.toString());
                         clients.remove(client.toString());
@@ -146,13 +152,16 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                     
                     Receiver.AckEntry ackEntry;
                     Loggers.PUSH.debug("push serviceName: {} to client: {}", serviceName, client.toString());
-                    // 创建 pushCacheKey
+                    // 创建缓存 key
                     String key = getPushCacheKey(serviceName, client.getIp(), client.getAgent());
                     byte[] compressData = null;
                     Map<String, Object> data = null;
+                    // 先从缓存中获取，默认不启用缓存，缓存中不存在，，准备数据，放入缓存中
                     if (switchDomain.getDefaultPushCacheMillis() >= 20000 && cache.containsKey(key)) {
                         // 缓存存在直接从缓存中获取
                         org.javatuples.Pair pair = (org.javatuples.Pair) cache.get(key);
+
+                        // 获取压缩数据
                         compressData = (byte[]) (pair.getValue0());
                         data = (Map<String, Object>) pair.getValue1();
                         
@@ -164,7 +173,7 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                     } else {
                         ackEntry = prepareAckEntry(client, prepareHostsData(client), lastRefTime);
                         if (ackEntry != null) {
-                            // 放入缓存
+                            // 往缓存中放入数据
                             cache.put(key, new org.javatuples.Pair<>(ackEntry.origin.getData(), ackEntry.data));
                         }
                     }
@@ -173,7 +182,7 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                             client.getServiceName(), client.getAddrStr(), client.getAgent(),
                             (ackEntry == null ? null : ackEntry.key));
 
-                    // udp 推送
+                    // 使用 udp Socket 进行推送，失败就重试，默认是重试1次的
                     udpPush(ackEntry);
                 }
             } catch (Exception e) {
@@ -184,7 +193,8 @@ public class PushService implements ApplicationContextAware, ApplicationListener
             }
             
         }, 1000, TimeUnit.MILLISECONDS);
-        
+
+        // 将 future 放到 futureMap 中
         futureMap.put(UtilsAndCommons.assembleFullServiceName(namespaceId, serviceName), future);
         
     }
@@ -336,8 +346,10 @@ public class PushService implements ApplicationContextAware, ApplicationListener
         
         try {
             byte[] dataBytes = dataStr.getBytes(StandardCharsets.UTF_8);
+            // 进行数据压缩
             dataBytes = compressIfNecessary(dataBytes);
-            
+
+            // 创建数据包
             DatagramPacket packet = new DatagramPacket(dataBytes, dataBytes.length, client.socketAddr);
             
             // we must store the key be fore send, otherwise there will be a chance the
@@ -385,13 +397,13 @@ public class PushService implements ApplicationContextAware, ApplicationListener
      * @param service service
      */
     public void serviceChanged(Service service) {
-        // merge some change events to reduce the push frequency:
+        // merge some change events to reduce the push frequency: 合并变更事件以减少推送频率
         if (futureMap
                 .containsKey(UtilsAndCommons.assembleFullServiceName(service.getNamespaceId(), service.getName()))) {
             return;
         }
 
-        // 发布 service 改变事件
+        // 发布 service 状态改变事件，使用 spring 的事件通知发布事件（PushService 服务也是一个 ServiceChangeEvent 事件的观察者，实现了 onApplicationEvent 方法）
         this.applicationContext.publishEvent(new ServiceChangeEvent(this, service));
     }
     
@@ -622,17 +634,20 @@ public class PushService implements ApplicationContextAware, ApplicationListener
         
         try {
             if (!ackMap.containsKey(ackEntry.key)) {
+                // 推送次数+1
                 totalPush++;
             }
             ackMap.put(ackEntry.key, ackEntry);
             udpSendTimeMap.put(ackEntry.key, System.currentTimeMillis());
             
             Loggers.PUSH.info("send udp packet: " + ackEntry.key);
+            // 推送
             udpSocket.send(ackEntry.origin);
-            
+
+            // 重试次数+1
             ackEntry.increaseRetryTime();
 
-            // 当收到 receiver 包会移除 ackMap、udpSendTimeMap，receiver 线程在 pushService 初始化时开启
+            // 当收到 receiver 包会移除 ackMap、udpSendTimeMap，receiver 线程在 PushService 初始化时开启
             GlobalExecutor.scheduleRetransmitter(new Retransmitter(ackEntry),
                     TimeUnit.NANOSECONDS.toMillis(ACK_TIMEOUT_NANOS), TimeUnit.MILLISECONDS);
             
@@ -678,11 +693,14 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 
                 try {
+                    // 接收请求
                     udpSocket.receive(packet);
-                    
+
+                    // 接收到请求拆包、反序列化
                     String json = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8).trim();
                     AckPacket ackPacket = JacksonUtils.toObj(json, AckPacket.class);
-                    
+
+                    // 客户端ip、端口
                     InetSocketAddress socketAddress = (InetSocketAddress) packet.getSocketAddress();
                     String ip = socketAddress.getAddress().getHostAddress();
                     int port = socketAddress.getPort();
@@ -690,22 +708,27 @@ public class PushService implements ApplicationContextAware, ApplicationListener
                     if (System.nanoTime() - ackPacket.lastRefTime > ACK_TIMEOUT_NANOS) {
                         Loggers.PUSH.warn("ack takes too long from {} ack json: {}", packet.getSocketAddress(), json);
                     }
-                    
+
+                    // 获取 ackKey
                     String ackKey = getAckKey(ip, port, ackPacket.lastRefTime);
+                    // 移除
                     AckEntry ackEntry = ackMap.remove(ackKey);
                     if (ackEntry == null) {
                         throw new IllegalStateException(
                                 "unable to find ackEntry for key: " + ackKey + ", ack json: " + json);
                     }
-                    
+
+                    // 获取推送耗时
                     long pushCost = System.currentTimeMillis() - udpSendTimeMap.get(ackKey);
                     
                     Loggers.PUSH
                             .info("received ack: {} from: {}:{}, cost: {} ms, unacked: {}, total push: {}", json, ip,
                                     port, pushCost, ackMap.size(), totalPush);
-                    
+
+                    // 记录推送耗时
                     pushCostMap.put(ackKey, pushCost);
-                    
+
+                    // 移除推送时间
                     udpSendTimeMap.remove(ackKey);
                     
                 } catch (Throwable e) {

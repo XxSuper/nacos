@@ -80,6 +80,7 @@ public class RaftPeerSet extends MemberChangeListener implements Closeable {
     @PostConstruct
     public void init() {
         NotifyCenter.registerSubscriber(this);
+        // 初始化 peers
         changePeers(memberManager.allMembers());
     }
     
@@ -182,11 +183,16 @@ public class RaftPeerSet extends MemberChangeListener implements Closeable {
      * @return new leader if new candidate has more than half vote, otherwise old leader
      */
     public RaftPeer decideLeader(RaftPeer candidate) {
+        // 将收到的投票信息放到 peers 中，遍历找出最大票数与对应的那个 peer，如果是最大票数超过了半数 +1 则当选 leader
         peers.put(candidate.ip, candidate);
-        
+
+        // 统计出现次数的 bag
         SortedBag ips = new TreeBag();
+        // 最多票
         int maxApproveCount = 0;
+        // 最多票的 peer
         String maxApprovePeer = null;
+        // 遍历 peer
         for (RaftPeer peer : peers.values()) {
             if (StringUtils.isEmpty(peer.voteFor)) {
                 continue;
@@ -198,13 +204,18 @@ public class RaftPeerSet extends MemberChangeListener implements Closeable {
                 maxApprovePeer = peer.voteFor;
             }
         }
-        
+
+        // 如果超过半数加1
         if (maxApproveCount >= majorityCount()) {
+            // 获取最大票的 peer
             RaftPeer peer = peers.get(maxApprovePeer);
+            // 将该 peer 设置成 leader
             peer.state = RaftPeer.State.LEADER;
-            
+
+            // 如果本地 leader 不是新选出的那个 peer，就将 leader 设置成选出的那个 peer
             if (!Objects.equals(leader, peer)) {
                 leader = peer;
+                // 发布 leader 选举完成事件
                 ApplicationUtils.publishEvent(new LeaderElectFinishedEvent(this, leader, local()));
                 Loggers.RAFT.info("{} has become the LEADER", leader.ip);
             }
@@ -220,16 +231,20 @@ public class RaftPeerSet extends MemberChangeListener implements Closeable {
      * @return new leader
      */
     public RaftPeer makeLeader(RaftPeer candidate) {
+        // 如果本地维护的 leader 不是远端的那个 peer，则重新设置下本地的 leader
         if (!Objects.equals(leader, candidate)) {
             leader = candidate;
+            // 发布leader改变的事件
             ApplicationUtils.publishEvent(new MakeLeaderEvent(this, leader, local()));
             Loggers.RAFT
                     .info("{} has become the LEADER, local: {}, leader: {}", leader.ip, JacksonUtils.toJson(local()),
                             JacksonUtils.toJson(leader));
         }
-        
+
+        // 遍历所有的 peer，找出以前的那个 leader，发送请求，获取一下它的 peer 信息，然后更新下维护的它的 peer 信息
         for (final RaftPeer peer : peers.values()) {
             Map<String, String> params = new HashMap<>(1);
+            // 遍历的当前 peer 不是远端节点(远端节点为当前 leader)，并且本地记录遍历的当前peer 为 leader（之前为 leader）
             if (!Objects.equals(peer, candidate) && peer.state == RaftPeer.State.LEADER) {
                 try {
                     String url = RaftCore.buildUrl(peer.ip, RaftCore.API_GET_PEER);
@@ -242,7 +257,8 @@ public class RaftPeerSet extends MemberChangeListener implements Closeable {
                                 peer.state = RaftPeer.State.FOLLOWER;
                                 return;
                             }
-                            
+
+                            // 更新下原先是 leader 的 peer
                             update(JacksonUtils.toObj(result.getData(), RaftPeer.class));
                         }
                         
@@ -262,7 +278,8 @@ public class RaftPeerSet extends MemberChangeListener implements Closeable {
                 }
             }
         }
-        
+
+        // 更新下本地维护的 leader peer 信息
         return update(candidate);
     }
     

@@ -31,7 +31,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * A subscriber to notify eventListener callback.
+ * A subscriber to notify eventListener callback.  提供 listener 注册、调用 listener 执行回调的功能
  *
  * @author horizonzy
  * @since 1.4.1
@@ -50,10 +50,13 @@ public class InstancesChangeNotifier extends Subscriber<InstancesChangeEvent> {
      * @param listener    custom listener
      */
     public void registerListener(String serviceName, String clusters, EventListener listener) {
+        // 获取 serviceKey
         String key = ServiceInfo.getKey(serviceName, clusters);
+        // 判断监听器集合是否已存在
         ConcurrentHashSet<EventListener> eventListeners = listenerMap.get(key);
         if (eventListeners == null) {
             synchronized (lock) {
+                // 防并发，二次确认监听器集合是否已存在，如不存在则创建
                 eventListeners = listenerMap.get(key);
                 if (eventListeners == null) {
                     eventListeners = new ConcurrentHashSet<EventListener>();
@@ -111,6 +114,7 @@ public class InstancesChangeNotifier extends Subscriber<InstancesChangeEvent> {
         if (CollectionUtils.isEmpty(eventListeners)) {
             return;
         }
+        // 获取监听器
         for (final EventListener listener : eventListeners) {
             final com.alibaba.nacos.api.naming.listener.Event namingEvent = transferToNamingEvent(event);
             if (listener instanceof AbstractEventListener && ((AbstractEventListener) listener).getExecutor() != null) {

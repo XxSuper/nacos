@@ -60,12 +60,14 @@ public class PushReceiver implements Runnable, Closeable {
     public PushReceiver(HostReactor hostReactor) {
         try {
             this.hostReactor = hostReactor;
+            // 开启一个 udpSocket
             String udpPort = getPushReceiverUdpPort();
             if (StringUtils.isEmpty(udpPort)) {
                 this.udpSocket = new DatagramSocket();
             } else {
                 this.udpSocket = new DatagramSocket(new InetSocketAddress(Integer.parseInt(udpPort)));
             }
+            // 创建调度线程池
             this.executorService = new ScheduledThreadPoolExecutor(1, new ThreadFactory() {
                 @Override
                 public Thread newThread(Runnable r) {
@@ -75,7 +77,8 @@ public class PushReceiver implements Runnable, Closeable {
                     return thread;
                 }
             });
-            
+
+            // 执行接收数据定时任务
             this.executorService.execute(this);
         } catch (Exception e) {
             NAMING_LOGGER.error("[NA] init udp socket failed", e);
@@ -87,18 +90,22 @@ public class PushReceiver implements Runnable, Closeable {
         while (!closed) {
             try {
                 
-                // byte[] is initialized with 0 full filled by default
+                // byte[] is initialized with 0 full filled by default. 64 * 1024 缓存区
                 byte[] buffer = new byte[UDP_MSS];
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-                
+
+                // 接收请求
                 udpSocket.receive(packet);
-                
+
+                // 解析 json
                 String json = new String(IoUtils.tryDecompress(packet.getData()), UTF_8).trim();
                 NAMING_LOGGER.info("received push data: " + json + " from " + packet.getAddress().toString());
-                
+
+                // 反序列化成 pushPacket
                 PushPacket pushPacket = JacksonUtils.toObj(json, PushPacket.class);
                 String ack;
                 if ("dom".equals(pushPacket.type) || "service".equals(pushPacket.type)) {
+                    // 如果 type 是 dom 或者是 service 交由 hostReactor 组件 processServiceJson 方法处理
                     hostReactor.processServiceJson(pushPacket.data);
                     
                     // send ack to server
@@ -114,7 +121,8 @@ public class PushReceiver implements Runnable, Closeable {
                     ack = "{\"type\": \"unknown-ack\"" + ", \"lastRefTime\":\"" + pushPacket.lastRefTime
                             + "\", \"data\":" + "\"\"}";
                 }
-                
+
+                // 发送 ack 给服务端
                 udpSocket.send(new DatagramPacket(ack.getBytes(UTF_8), ack.getBytes(UTF_8).length,
                         packet.getSocketAddress()));
             } catch (Exception e) {

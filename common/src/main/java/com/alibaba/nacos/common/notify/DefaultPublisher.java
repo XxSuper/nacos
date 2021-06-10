@@ -196,6 +196,7 @@ public class DefaultPublisher extends Thread implements EventPublisher {
         final Runnable job = new Runnable() {
             @Override
             public void run() {
+                // InstancesChangeNotifier 的 onEvent
                 subscriber.onEvent(event);
             }
         };

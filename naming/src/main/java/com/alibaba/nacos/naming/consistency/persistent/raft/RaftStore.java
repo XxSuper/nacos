@@ -79,11 +79,14 @@ public class RaftStore implements Closeable {
         long start = System.currentTimeMillis();
         for (File cache : listCaches()) {
             if (cache.isDirectory() && cache.listFiles() != null) {
+                // 遍历数据文件
                 for (File datumFile : cache.listFiles()) {
+                    // 读取数据
                     datum = readDatum(datumFile, cache.getName());
                     if (datum != null) {
                         datums.put(datum.key, datum);
                         if (notifier != null) {
+                            // 通知
                             NotifyCenter.publishEvent(
                                     ValueChangeEvent.builder().key(datum.key).action(DataOperation.CHANGE).build());
                         }
@@ -146,6 +149,7 @@ public class RaftStore implements Closeable {
     }
     
     private synchronized Datum readDatum(File file, String namespaceId) throws IOException {
+        // 文件名不是以 com.alibaba.nacos.naming 开头，直接返回
         if (!KeyBuilder.isDatumCacheFile(file.getName())) {
             return null;
         }
@@ -153,24 +157,28 @@ public class RaftStore implements Closeable {
         try (FileChannel fc = new FileInputStream(file).getChannel()) {
             buffer = ByteBuffer.allocate((int) file.length());
             fc.read(buffer);
-            
+
+            // 读取文件内容
             String json = new String(buffer.array(), StandardCharsets.UTF_8);
             if (StringUtils.isBlank(json)) {
                 return null;
             }
             
             final String fileName = file.getName();
-            
+
+            // 以 00-00---000-NACOS_SWITCH_DOMAIN-000---00-00 结尾的文件，返回 SwitchDomain
             if (KeyBuilder.matchSwitchKey(fileName)) {
                 return JacksonUtils.toObj(json, new TypeReference<Datum<SwitchDomain>>() {
                 });
             }
-            
+
+            // 文件名以 com.alibaba.nacos.naming.domains.meta. 或者 meta. 开始
             if (KeyBuilder.matchServiceMetaKey(fileName)) {
                 
                 Datum<Service> serviceDatum;
                 
                 try {
+                    // Datum<Service>
                     serviceDatum = JacksonUtils.toObj(json.replace("\\", ""), new TypeReference<Datum<Service>>() {
                     });
                 } catch (Exception e) {
@@ -192,12 +200,14 @@ public class RaftStore implements Closeable {
                 
                 return serviceDatum;
             }
-            
+
+            // 文件名以 com.alibaba.nacos.naming.iplist. 或 iplist. 开始的文件
             if (KeyBuilder.matchInstanceListKey(fileName)) {
                 
                 Datum<Instances> instancesDatum;
                 
                 try {
+                    // 返回 Datum<Instances>
                     instancesDatum = JacksonUtils.toObj(json, new TypeReference<Datum<Instances>>() {
                     });
                 } catch (Exception e) {
